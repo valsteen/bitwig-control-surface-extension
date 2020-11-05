@@ -3,9 +3,15 @@
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.djcrontab.code</groupId>
-	<artifactId>dj-crontab-extensions</artifactId>
+	<artifactId>control-surface-extension</artifactId>
 	<packaging>jar</packaging>
-	<name>dj-crontab-extensions</name>
+	<name>control-surface-extension</name>
+
+	<properties>
+		<kotlin.version>1.4.10</kotlin.version>
+		<fatJar.descriptorRef>jar-with-dependencies</fatJar.descriptorRef>
+	</properties>
+
 	<version>0.1</version>
 	
 	<repositories>
@@ -22,24 +28,48 @@
 			<artifactId>extension-api</artifactId>
 			<version>12</version>
 		</dependency>
-	</dependencies>
+		<dependency>
+			<groupId>org.jetbrains.kotlin</groupId>
+			<artifactId>kotlin-stdlib</artifactId>
+			<version>${kotlin.version}</version>
+		</dependency>
+        <dependency>
+            <groupId>org.jetbrains.kotlinx</groupId>
+            <artifactId>kotlinx-coroutines-core</artifactId>
+            <version>1.3.7</version>
+        </dependency>
+		<dependency>
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-lang3</artifactId>
+			<version>3.5</version>
+		</dependency>
+    </dependencies>
 
 	<build>
 		<plugins>
-		   <plugin>
-               <groupId>org.apache.maven.plugins</groupId>
-               <artifactId>maven-compiler-plugin</artifactId>
-               <version>3.8.0</version>
-               <configuration>
-                  <optimize>true</optimize>
-                  <fork>true</fork>
-                  <source>1.8</source>
-                  <target>1.8</target>
-                  <encoding>UTF-8</encoding>
-                  <maxmem>1024m</maxmem>
-               </configuration>
-         </plugin>
-		
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-assembly-plugin</artifactId>
+				<version>3.1.1</version>
+
+				<configuration>
+					<descriptorRefs>
+						<descriptorRef>jar-with-dependencies</descriptorRef>
+					</descriptorRefs>
+				</configuration>
+
+				<executions>
+					<execution>
+						<id>make-assembly</id>
+						<phase>package</phase>
+						<goals>
+							<goal>single</goal>
+						</goals>
+					</execution>
+				</executions>
+
+			</plugin>
+
 			<plugin>
 				<groupId>com.coderplus.maven.plugins</groupId>
 				<artifactId>copy-rename-maven-plugin</artifactId>
@@ -52,14 +82,67 @@
 							<goal>copy</goal>
 						</goals>
 						<configuration>
-							<sourceFile>${project.build.directory}/${project.build.finalName}.jar</sourceFile>
-							<destinationFile>${project.build.directory}/CrontabExtension.bwextension</destinationFile>
+							<sourceFile>${project.build.directory}/${project.build.finalName}-${fatJar.descriptorRef}.jar</sourceFile>
+							<!-- <destinationFile>${project.build.directory}/control-surface-extension.bwextension</destinationFile> -->
+							<destinationFile>/Users/vincent/Documents/Bitwig Studio/Extensions/control-surface-extension.bwextension</destinationFile>
 						</configuration>
 					</execution>
 				</executions>
 			</plugin>
+			<plugin>
+				<groupId>org.jetbrains.kotlin</groupId>
+				<artifactId>kotlin-maven-plugin</artifactId>
+				<version>${kotlin.version}</version>
+				<executions>
+					<execution>
+						<id>compile</id>
+						<phase>compile</phase>
+						<goals>
+							<goal>compile</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>test-compile</id>
+						<phase>test-compile</phase>
+						<goals>
+							<goal>test-compile</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<jvmTarget>1.8</jvmTarget>
+					<languageVersion>1.4</languageVersion>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<version>3.8.0</version>
+				<executions>
+					<execution>
+						<id>compile</id>
+						<phase>compile</phase>
+						<goals>
+							<goal>compile</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>testCompile</id>
+						<phase>test-compile</phase>
+						<goals>
+							<goal>testCompile</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+				   <optimize>true</optimize>
+				   <fork>true</fork>
+				   <source>1.8</source>
+				   <target>1.8</target>
+				   <encoding>UTF-8</encoding>
+				   <maxmem>1024m</maxmem>
+				</configuration>
+		  </plugin>
 		</plugins>
 	</build>
-
 </project>
-
