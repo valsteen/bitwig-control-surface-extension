@@ -16,8 +16,18 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
     private var devices = mutableListOf<CursorDevice>()
     private var tracks = mutableListOf<CursorTrack>()
 
+    val messageQueue = mutableListOf<ByteArray>()
+
+    fun send(message: String) {
+        val asByteArray = (message + "\n").toByteArray()
+        if (remoteConnection != null) {
+            remoteConnection!!.send(asByteArray)
+        } else {
+            messageQueue.add(asByteArray)
+        }
+    }
+
     override fun init() {
-        val messageQueue = mutableListOf<ByteArray>()
         setupDebug()
 
         application = host.createApplication()
@@ -33,27 +43,21 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
             devices.add(cursorDevice)
 
             val remoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8)
+
+            remoteControlsPage.name.addValueObserver {
+
+            }
+
             for (j in 0..7) {
                 val parameter = remoteControlsPage.getParameter(j)
                 parameter.name().addValueObserver {
-                    val message = "$i,$j,name,$it\n".toByteArray()
-
-                    if (remoteConnection != null) {
-                        remoteConnection!!.send(message)
-                    } else {
-                        messageQueue.add(message)
-                    }
+                    send("$i,$j,name,$it")
                 }
                 var lastKnownValue = 0f ;
                 parameter.value().addValueObserver {
                     val newValue = truncate(it.toFloat() * 1000f) / 1000f
                     if (newValue != lastKnownValue) {
-                        val message = "$i,$j,value,$newValue\n".toByteArray()
-                        if (remoteConnection != null) {
-                            remoteConnection!!.send(message)
-                        } else {
-                            messageQueue.add(message)
-                        }
+                        send("$i,$j,value,$newValue")
                     }
                     lastKnownValue = newValue
                 }
@@ -61,12 +65,7 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                 var lastKnownDisplayedValue = "" ;
                 parameter.displayedValue().addValueObserver {
                     if (it != lastKnownDisplayedValue) {
-                        val message = "$i,$j,display,$it\n".toByteArray()
-                        if (remoteConnection != null) {
-                            remoteConnection!!.send(message)
-                        } else {
-                            messageQueue.add(message)
-                        }
+                        send("$i,$j,display,$it")
                     }
                     lastKnownDisplayedValue = it
                 }
