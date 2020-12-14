@@ -1,6 +1,7 @@
 package com.djcrontab.code.extensions
 
 import com.bitwig.extension.controller.api.*
+import kotlin.math.truncate
 
 class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDefinition, host: ControllerHost) :
     ExtensionDebugSocketBase(definition, host) {
@@ -34,13 +35,31 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                         messageQueue.add(message)
                     }
                 }
+                var lastKnownValue = 0f ;
                 parameter.value().addValueObserver {
-                    val message = "$i,$j,value,$it\n".toByteArray()
-                    if (remoteConnection != null) {
-                        remoteConnection!!.send(message)
-                    } else {
-                        messageQueue.add(message)
+                    val newValue = truncate(it.toFloat() * 1000f) / 1000f
+                    if (newValue != lastKnownValue) {
+                        val message = "$i,$j,value,$newValue\n".toByteArray()
+                        if (remoteConnection != null) {
+                            remoteConnection!!.send(message)
+                        } else {
+                            messageQueue.add(message)
+                        }
                     }
+                    lastKnownValue = newValue
+                }
+
+                var lastKnownDisplayedValue = "" ;
+                parameter.displayedValue().addValueObserver {
+                    if (it != lastKnownDisplayedValue) {
+                        val message = "$i,$j,display,$it\n".toByteArray()
+                        if (remoteConnection != null) {
+                            remoteConnection!!.send(message)
+                        } else {
+                            messageQueue.add(message)
+                        }
+                    }
+                    lastKnownDisplayedValue = it
                 }
             }
 
