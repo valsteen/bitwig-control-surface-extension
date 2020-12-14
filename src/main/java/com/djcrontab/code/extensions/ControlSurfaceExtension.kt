@@ -13,17 +13,26 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
             return host.project
         }
     private lateinit var remoteControlsPages : List<RemoteControlsPage>
+    private var devices = mutableListOf<CursorDevice>()
+    private var tracks = mutableListOf<CursorTrack>()
 
     override fun init() {
         val messageQueue = mutableListOf<ByteArray>()
         setupDebug()
 
+        application = host.createApplication()
+
+        val mainCursorTrack = host.createCursorTrack(0,0)
+        val mainCursorDevice = mainCursorTrack.createCursorDevice()
 
         remoteControlsPages = List<RemoteControlsPage>(8) { i ->
             val cursorTrack = host.createCursorTrack("Cursor ID $i", "Cursor $i", 0, 0, true)
             val cursorDevice = cursorTrack.createCursorDevice("Device ID $i", "Device $i", 0, CursorDeviceFollowMode.FOLLOW_SELECTION)
-            val remoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8)
 
+            tracks.add(cursorTrack)
+            devices.add(cursorDevice)
+
+            val remoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8)
             for (j in 0..7) {
                 val parameter = remoteControlsPage.getParameter(j)
                 parameter.name().addValueObserver {
@@ -82,11 +91,20 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
 
             remoteConnection.setReceiveCallback { message ->
                 val parts = message.decodeToString().split(",")
-                val device = parts[0].toInt()
-                val parameter = parts[1].toInt()
-                val value = parts[2].toDouble()
-
-                remoteControlsPages[device].getParameter(parameter).value().set(value)
+                val action = parts[0]
+                val device = parts[1].toInt()
+                if (action == "value") {
+                    val parameter = parts[2].toInt()
+                    val value = parts[3].toDouble()
+                    remoteControlsPages[device].getParameter(parameter).value().set(value)
+                } else if (action == "focus") {
+                    tracks[device].selectInEditor()
+                    devices[device].selectInEditor()
+                    application.getAction("focus_track_header_area").invoke()
+                    application.getAction("select_item_at_cursor").invoke()
+                    application.getAction("focus_or_toggle_device_panel").invoke()
+                    application.getAction("select_item_at_cursor").invoke()
+                }
             }
         }
     }

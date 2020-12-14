@@ -1,14 +1,18 @@
 package com.djcrontab.code.extensions
 
 import com.bitwig.extension.controller.ControllerExtension
+import com.bitwig.extension.controller.api.Application
 import com.bitwig.extension.controller.api.ControllerHost
 import com.djcrontab.code.utils.debug.DebugSocket
 
 abstract class ExtensionDebugSocketBase(definition: ControlSurfaceExtensionDefinition, host: ControllerHost) : ControllerExtension(definition, host) {
     protected lateinit var debug: DebugSocket
+    protected lateinit var application: Application
+
     protected fun setupDebug() {
         val queuedMessages = ArrayList<String>()
         val remoteSocket = host.createRemoteConnection("Debug Socket", 43266)
+
         debug = DebugSocket(
             remoteSocket,
             fallback = {
