@@ -24,6 +24,9 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
             remoteConnection!!.send(asByteArray)
         } else {
             messageQueue.add(asByteArray)
+            if (messageQueue.size > 100) {
+                messageQueue.removeFirst()
+            }
         }
     }
 
