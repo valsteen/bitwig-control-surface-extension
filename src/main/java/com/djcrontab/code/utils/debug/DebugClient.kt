@@ -89,12 +89,12 @@ fun main(args: Array<String>) {
 
     val port = args.let {
         if (args.isEmpty()) {
-            5555
+            43266
         } else {
             try {
                 args[0].toInt()
             } catch (e: NumberFormatException) {
-                5555
+                43266
             }
         }
     }

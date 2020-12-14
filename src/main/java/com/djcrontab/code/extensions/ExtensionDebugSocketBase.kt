@@ -8,7 +8,7 @@ abstract class ExtensionDebugSocketBase(definition: ControlSurfaceExtensionDefin
     protected lateinit var debug: DebugSocket
     protected fun setupDebug() {
         val queuedMessages = ArrayList<String>()
-        val remoteSocket = host.createRemoteConnection("Debug Socket", 5555)
+        val remoteSocket = host.createRemoteConnection("Debug Socket", 43266)
         debug = DebugSocket(
             remoteSocket,
             fallback = {
