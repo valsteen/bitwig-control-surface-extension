@@ -3,6 +3,71 @@ package com.djcrontab.code.extensions
 import com.bitwig.extension.controller.api.*
 import kotlin.math.truncate
 
+
+class DeviceController(
+    private val cursorTrack: CursorTrack,
+    private val cursorDevice: CursorDevice,
+    val index: Int,
+    val sendChange: (String) -> Unit,
+    val debug: (String) -> Unit,
+    private val callAction: (String) -> Unit
+) {
+    fun focus() {
+        cursorTrack.selectInEditor()
+        cursorDevice.selectInEditor()
+        callAction("focus_track_header_area")
+        callAction("select_item_at_cursor")
+        callAction("focus_or_toggle_device_panel")
+        callAction("select_item_at_cursor")
+    }
+}
+
+class ParameterController(
+    private val deviceController: DeviceController,
+    private val remoteControl: RemoteControl,
+    private val index: Int,
+) {
+    var lastKnownValue = 0f
+    var lastKnownDisplayValue = ""
+    var lastKnownName = ""
+
+    init {
+        remoteControl.name().addValueObserver {
+            if (it != lastKnownName) {
+                lastKnownName = it
+                deviceController.sendChange("${deviceController.index},$index,name,$it")
+            }
+        }
+        remoteControl.value().addValueObserver {
+            val newValue = truncate((it.toFloat() * 1000f))/ 1000f
+            deviceController.debug("?$newValue,$lastKnownValue,$it")
+            if (newValue != lastKnownValue) {
+                lastKnownValue = newValue
+                deviceController.sendChange("${deviceController.index},$index,value,$newValue")
+            }
+        }
+        remoteControl.displayedValue().addValueObserver {
+            if (it != lastKnownDisplayValue) {
+                lastKnownDisplayValue = it
+                deviceController.sendChange("${deviceController.index},$index,display,$it")
+            }
+        }
+    }
+
+    fun setValue(value: Double) {
+        val newValue = truncate((value.toFloat() * 1000f))/ 1000f
+        if (newValue != lastKnownValue) {
+            remoteControl.value().set(newValue.toDouble())
+            lastKnownValue = newValue
+        }
+
+    }
+}
+
+
+data class ParameterIndex(val deviceIndex: Int, val parameterIndex: Int)
+class ParametersMap : HashMap<ParameterIndex, ParameterController>()
+
 class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDefinition, host: ControllerHost) :
     ExtensionDebugSocketBase(definition, host) {
 
@@ -12,15 +77,16 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
         get() {
             return host.project
         }
-    private lateinit var remoteControlsPages : List<RemoteControlsPage>
-    private var devices = mutableListOf<CursorDevice>()
-    private var tracks = mutableListOf<CursorTrack>()
+
+    private var parameterControllers = ParametersMap()
+    private var deviceControllers = HashMap<Int, DeviceController>()
 
     val messageQueue = mutableListOf<ByteArray>()
 
     fun send(message: String) {
         val asByteArray = (message + "\n").toByteArray()
         if (remoteConnection != null) {
+            debug.out("will send $message")
             remoteConnection!!.send(asByteArray)
         } else {
             messageQueue.add(asByteArray)
@@ -34,47 +100,37 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
         setupDebug()
 
         application = host.createApplication()
-
-        val mainCursorTrack = host.createCursorTrack(0,0)
-        val mainCursorDevice = mainCursorTrack.createCursorDevice()
-
-        remoteControlsPages = List<RemoteControlsPage>(8) { i ->
+        
+        for (i in 0..7) {
             val cursorTrack = host.createCursorTrack("Cursor ID $i", "Cursor $i", 0, 0, true)
             val cursorDevice = cursorTrack.createCursorDevice("Device ID $i", "Device $i", 0, CursorDeviceFollowMode.FOLLOW_SELECTION)
 
-            tracks.add(cursorTrack)
-            devices.add(cursorDevice)
+            val deviceController = DeviceController(
+                cursorTrack,
+                cursorDevice,
+                i,
+                this::send,
+                this.debug::out
+            ) { application.getAction(it).invoke() }
+
+            deviceControllers[i] = deviceController
 
             val remoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8)
 
+            // TODO
             remoteControlsPage.name.addValueObserver {
 
             }
 
             for (j in 0..7) {
-                val parameter = remoteControlsPage.getParameter(j)
-                parameter.name().addValueObserver {
-                    send("$i,$j,name,$it")
-                }
-                var lastKnownValue = 0f ;
-                parameter.value().addValueObserver {
-                    val newValue = truncate(it.toFloat() * 1000f) / 1000f
-                    if (newValue != lastKnownValue) {
-                        send("$i,$j,value,$newValue")
-                    }
-                    lastKnownValue = newValue
-                }
-
-                var lastKnownDisplayedValue = "" ;
-                parameter.displayedValue().addValueObserver {
-                    if (it != lastKnownDisplayedValue) {
-                        send("$i,$j,display,$it")
-                    }
-                    lastKnownDisplayedValue = it
-                }
+                val remoteControl: RemoteControl = remoteControlsPage.getParameter(j)
+                val parameterController = ParameterController(
+                    deviceController,
+                    remoteControl,
+                    j
+                )
+                parameterControllers[ParameterIndex(i, j)] = parameterController
             }
-
-            remoteControlsPage
         }
 
         remoteControlSocket = host.createRemoteConnection("Remote control", 60123)
@@ -98,14 +154,9 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                 if (action == "value") {
                     val parameter = parts[2].toInt()
                     val value = parts[3].toDouble()
-                    remoteControlsPages[device].getParameter(parameter).value().set(value)
+                    parameterControllers[ParameterIndex(device, parameter)]!!.setValue(value)
                 } else if (action == "focus") {
-                    tracks[device].selectInEditor()
-                    devices[device].selectInEditor()
-                    application.getAction("focus_track_header_area").invoke()
-                    application.getAction("select_item_at_cursor").invoke()
-                    application.getAction("focus_or_toggle_device_panel").invoke()
-                    application.getAction("select_item_at_cursor").invoke()
+                    deviceControllers[device]!!.focus()
                 }
             }
         }
