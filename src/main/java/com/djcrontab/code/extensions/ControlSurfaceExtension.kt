@@ -35,27 +35,45 @@ class ParameterController(
         remoteControl.name().addValueObserver {
             if (it != lastKnownName) {
                 lastKnownName = it
-                deviceController.sendChange("${deviceController.index},$index,name,$it")
+                updateName()
             }
         }
         remoteControl.value().addValueObserver {
-            val newValue = truncate((it.toFloat() * 1000f))/ 1000f
+            val newValue = truncate((it.toFloat() * 1000f)) / 1000f
             deviceController.debug("?$newValue,$lastKnownValue,$it")
             if (newValue != lastKnownValue) {
                 lastKnownValue = newValue
-                deviceController.sendChange("${deviceController.index},$index,value,$newValue")
+                updateValue()
             }
         }
         remoteControl.displayedValue().addValueObserver {
             if (it != lastKnownDisplayValue) {
                 lastKnownDisplayValue = it
-                deviceController.sendChange("${deviceController.index},$index,display,$it")
+                updateDisplayedValue()
             }
         }
     }
 
+    fun updateName() {
+        deviceController.sendChange("${deviceController.index},$index,name,$lastKnownName")
+    }
+
+    fun updateValue() {
+        deviceController.sendChange("${deviceController.index},$index,value,$lastKnownValue")
+    }
+
+    fun updateDisplayedValue() {
+        deviceController.sendChange("${deviceController.index},$index,display,$lastKnownDisplayValue")
+    }
+
+    fun updateAll() {
+        updateName()
+        updateValue()
+        updateDisplayedValue()
+    }
+
     fun setValue(value: Double) {
-        val newValue = truncate((value.toFloat() * 1000f))/ 1000f
+        val newValue = truncate((value.toFloat() * 1000f)) / 1000f
         if (newValue != lastKnownValue) {
             remoteControl.value().set(newValue.toDouble())
             lastKnownValue = newValue
@@ -96,46 +114,15 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
         }
     }
 
-    override fun init() {
-        setupDebug()
-
-        application = host.createApplication()
-        
-        for (i in 0..7) {
-            val cursorTrack = host.createCursorTrack("Cursor ID $i", "Cursor $i", 0, 0, true)
-            val cursorDevice = cursorTrack.createCursorDevice("Device ID $i", "Device $i", 0, CursorDeviceFollowMode.FOLLOW_SELECTION)
-
-            val deviceController = DeviceController(
-                cursorTrack,
-                cursorDevice,
-                i,
-                this::send,
-                this.debug::out
-            ) { application.getAction(it).invoke() }
-
-            deviceControllers[i] = deviceController
-
-            val remoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8)
-
-            // TODO
-            remoteControlsPage.name.addValueObserver {
-
-            }
-
-            for (j in 0..7) {
-                val remoteControl: RemoteControl = remoteControlsPage.getParameter(j)
-                val parameterController = ParameterController(
-                    deviceController,
-                    remoteControl,
-                    j
-                )
-                parameterControllers[ParameterIndex(i, j)] = parameterController
-            }
-        }
-
+    private fun createRemoteControlSocket() {
         remoteControlSocket = host.createRemoteConnection("Remote control", 60123)
         remoteControlSocket.setClientConnectCallback { remoteConnection ->
             host.showPopupNotification("Remote control connected")
+
+            for (parameter in parameterControllers.values) {
+                parameter.updateAll()
+            }
+
             this.remoteConnection = remoteConnection
             remoteConnection.setDisconnectCallback {
                 host.showPopupNotification("Remote control disconnected")
@@ -160,6 +147,64 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                 }
             }
         }
+    }
+
+    private fun createCursors() {
+        for (i in 0..7) {
+            val cursorTrack = host.createCursorTrack("Cursor ID $i", "Cursor $i", 0, 0, true)
+            val cursorDevice =
+                cursorTrack.createCursorDevice("Device ID $i", "Device $i", 0, CursorDeviceFollowMode.FOLLOW_SELECTION)
+
+            val deviceController = DeviceController(
+                cursorTrack,
+                cursorDevice,
+                i,
+                this::send,
+                this.debug::out
+            ) { application.getAction(it).invoke() }
+
+            deviceControllers[i] = deviceController
+
+            val remoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8)
+
+            var deviceName = ""
+            var remoteControlsPageName = ""
+
+            fun sendDeviceName() {
+                var name = deviceName
+                if (remoteControlsPageName != "") {
+                    name += "/$remoteControlsPageName"
+                }
+                send("$i,devicename,$name")
+            }
+
+            remoteControlsPage.name.addValueObserver {
+                remoteControlsPageName = it
+                sendDeviceName()
+            }
+
+            cursorDevice.name().addValueObserver {
+                deviceName = it
+                sendDeviceName()
+            }
+
+            for (j in 0..7) {
+                val remoteControl: RemoteControl = remoteControlsPage.getParameter(j)
+                val parameterController = ParameterController(
+                    deviceController,
+                    remoteControl,
+                    j
+                )
+                parameterControllers[ParameterIndex(i, j)] = parameterController
+            }
+        }
+    }
+
+    override fun init() {
+        application = host.createApplication()
+        setupDebug()
+        createCursors()
+        createRemoteControlSocket()
     }
 
     override fun flush() {}
