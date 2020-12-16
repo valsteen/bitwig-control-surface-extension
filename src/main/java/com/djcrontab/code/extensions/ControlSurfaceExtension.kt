@@ -175,7 +175,6 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                 }
             }
 
-
             remoteConnection.setDisconnectCallback {
                 host.showPopupNotification("Remote control disconnected")
                 this.remoteConnection = null
@@ -202,7 +201,7 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
     }
 
     private fun createCursors() {
-        for (i in 0..7) {
+        for (i in 0 until 12) {
             val cursorTrack = host.createCursorTrack("Cursor ID $i", "Cursor $i", 0, 0, true)
             val cursorDevice =
                 cursorTrack.createCursorDevice("Device ID $i", "Device $i", 0, CursorDeviceFollowMode.FOLLOW_SELECTION)
