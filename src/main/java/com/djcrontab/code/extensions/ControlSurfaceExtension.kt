@@ -7,11 +7,15 @@ import kotlin.math.truncate
 class DeviceController(
     private val cursorTrack: CursorTrack,
     private val cursorDevice: CursorDevice,
+    private val remoteControlsPage: CursorRemoteControlsPage,
     val index: Int,
     val sendChange: (String) -> Unit,
     val debug: (String) -> Unit,
     private val callAction: (String) -> Unit
 ) {
+    var deviceName = ""
+    var remoteControlsPageName = ""
+
     fun focus() {
         cursorTrack.selectInEditor()
         cursorDevice.selectInEditor()
@@ -20,6 +24,31 @@ class DeviceController(
         callAction("focus_or_toggle_device_panel")
         callAction("select_item_at_cursor")
     }
+
+    fun sendDeviceName() {
+        var name = deviceName
+        if (remoteControlsPageName != "") {
+            name += "/$remoteControlsPageName"
+        }
+        sendChange("$index,devicename,$name")
+    }
+
+    fun updateAll() {
+        sendDeviceName()
+    }
+
+    init {
+        remoteControlsPage.name.addValueObserver {
+            remoteControlsPageName = it
+            sendDeviceName()
+        }
+
+        cursorDevice.name().addValueObserver {
+            deviceName = it
+            sendDeviceName()
+        }
+    }
+
 }
 
 class ParameterController(
@@ -78,7 +107,6 @@ class ParameterController(
             remoteControl.value().set(newValue.toDouble())
             lastKnownValue = newValue
         }
-
     }
 }
 
@@ -97,7 +125,7 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
         }
 
     private var parameterControllers = ParametersMap()
-    private var deviceControllers = HashMap<Int, DeviceController>()
+    private var deviceControllers = mutableListOf<DeviceController>()
 
     val messageQueue = mutableListOf<ByteArray>()
 
@@ -119,6 +147,9 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
         remoteControlSocket.setClientConnectCallback { remoteConnection ->
             host.showPopupNotification("Remote control connected")
 
+            for (device in deviceControllers) {
+                device.updateAll()
+            }
             for (parameter in parameterControllers.values) {
                 parameter.updateAll()
             }
@@ -143,7 +174,7 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                     val value = parts[3].toDouble()
                     parameterControllers[ParameterIndex(device, parameter)]!!.setValue(value)
                 } else if (action == "focus") {
-                    deviceControllers[device]!!.focus()
+                    deviceControllers[device].focus()
                 }
             }
         }
@@ -154,39 +185,18 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
             val cursorTrack = host.createCursorTrack("Cursor ID $i", "Cursor $i", 0, 0, true)
             val cursorDevice =
                 cursorTrack.createCursorDevice("Device ID $i", "Device $i", 0, CursorDeviceFollowMode.FOLLOW_SELECTION)
+            val remoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8)
 
             val deviceController = DeviceController(
                 cursorTrack,
                 cursorDevice,
+                remoteControlsPage,
                 i,
                 this::send,
                 this.debug::out
             ) { application.getAction(it).invoke() }
 
-            deviceControllers[i] = deviceController
-
-            val remoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8)
-
-            var deviceName = ""
-            var remoteControlsPageName = ""
-
-            fun sendDeviceName() {
-                var name = deviceName
-                if (remoteControlsPageName != "") {
-                    name += "/$remoteControlsPageName"
-                }
-                send("$i,devicename,$name")
-            }
-
-            remoteControlsPage.name.addValueObserver {
-                remoteControlsPageName = it
-                sendDeviceName()
-            }
-
-            cursorDevice.name().addValueObserver {
-                deviceName = it
-                sendDeviceName()
-            }
+            deviceControllers.add(deviceController)
 
             for (j in 0..7) {
                 val remoteControl: RemoteControl = remoteControlsPage.getParameter(j)
