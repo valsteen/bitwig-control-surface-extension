@@ -51,6 +51,8 @@ class DeviceController(
 
 }
 
+// TODO : "touch"
+
 class ParameterController(
     private val deviceController: DeviceController,
     private val remoteControl: RemoteControl,
@@ -127,17 +129,33 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
     private var parameterControllers = ParametersMap()
     private var deviceControllers = mutableListOf<DeviceController>()
 
-    val messageQueue = mutableListOf<ByteArray>()
+    val offlineMessageQueue = mutableListOf<ByteArray>()
+    var initMessageBuffer : String = ""
+
+    var bufferingActive = false
+
+    fun bufferedSend(codeBlock: () -> Unit) {
+        bufferingActive = true
+        codeBlock()
+        remoteConnection!!.send(initMessageBuffer.toByteArray())
+        initMessageBuffer = ""
+        bufferingActive = false
+    }
 
     fun send(message: String) {
-        val asByteArray = (message + "\n").toByteArray()
+        if (bufferingActive) {
+            initMessageBuffer += "$message\n"
+            return
+        }
+
+        val asByteArray = ("$message\n").toByteArray()
         if (remoteConnection != null) {
             debug.out("will send $message")
             remoteConnection!!.send(asByteArray)
         } else {
-            messageQueue.add(asByteArray)
-            if (messageQueue.size > 100) {
-                messageQueue.removeFirst()
+            offlineMessageQueue.add(asByteArray)
+            if (offlineMessageQueue.size > 100) {
+                offlineMessageQueue.removeFirst()
             }
         }
     }
@@ -145,25 +163,28 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
     private fun createRemoteControlSocket() {
         remoteControlSocket = host.createRemoteConnection("Remote control", 60123)
         remoteControlSocket.setClientConnectCallback { remoteConnection ->
+            this.remoteConnection = remoteConnection
             host.showPopupNotification("Remote control connected")
 
-            for (device in deviceControllers) {
-                device.updateAll()
-            }
-            for (parameter in parameterControllers.values) {
-                parameter.updateAll()
+            bufferedSend {
+                for (device in deviceControllers) {
+                    device.updateAll()
+                }
+                for (parameter in parameterControllers.values) {
+                    parameter.updateAll()
+                }
             }
 
-            this.remoteConnection = remoteConnection
+
             remoteConnection.setDisconnectCallback {
                 host.showPopupNotification("Remote control disconnected")
                 this.remoteConnection = null
             }
 
-            for (message in messageQueue) {
+            for (message in offlineMessageQueue) {
                 remoteConnection.send(message)
             }
-            messageQueue.clear()
+            offlineMessageQueue.clear()
 
             remoteConnection.setReceiveCallback { message ->
                 val parts = message.decodeToString().split(",")
