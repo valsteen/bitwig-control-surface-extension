@@ -56,6 +56,14 @@ class DeviceController (
         }
     }
 
+    fun previousPage() {
+        remoteControlsPage.selectPreviousPage(true)
+    }
+
+    fun nextPage() {
+        remoteControlsPage.selectNextPage(true)
+    }
+
     var pageNameIsDirty = false
     var nameIsDirty = false
 
@@ -224,16 +232,26 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                 val parts = message.decodeToString().split(",")
                 val action = parts[0]
                 val device = parts[1].toInt()
-                if (action == "value") {
-                    val parameter = parts[2].toInt()
-                    val value = parts[3].toDouble()
-                    parameterControllers[ParameterIndex(device, parameter)]!!.setValue(value)
-                } else if (action == "focus") {
-                    deviceControllers[device].focus()
-                } else if (action == "touch") {
-                    val parameter = parts[2].toInt()
-                    val value = parts[3].toInt()
-                    parameterControllers[ParameterIndex(device, parameter)]!!.touch(value != 0)
+                when (action) {
+                    "value" -> {
+                        val parameter = parts[2].toInt()
+                        val value = parts[3].toDouble()
+                        parameterControllers[ParameterIndex(device, parameter)]!!.setValue(value)
+                    }
+                    "next" -> {
+                        deviceControllers[device].nextPage()
+                    }
+                    "previous" -> {
+                        deviceControllers[device].previousPage()
+                    }
+                    "focus" -> {
+                        deviceControllers[device].focus()
+                    }
+                    "touch" -> {
+                        val parameter = parts[2].toInt()
+                        val value = parts[3].toInt()
+                        parameterControllers[ParameterIndex(device, parameter)]!!.touch(value != 0)
+                    }
                 }
             }
         }
@@ -244,15 +262,21 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
             val cursorTrack = host.createCursorTrack("Cursor ID $i", "Cursor $i", 0, 0, true)
             val cursorDevice =
                 cursorTrack.createCursorDevice("Device ID $i", "Device $i", 0, CursorDeviceFollowMode.FOLLOW_SELECTION)
-            val remoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8)
-            val t: CursorRemoteControlsPage = cursorDevice.createCursorRemoteControlsPage("Remotes cursor $i", 8, null)
 
+            // bitwig mixes up created page cursor belonging to different cursors. But if several cursors are bound
+            // to the same device, those cursors will be independent. So for each device I create here `device index`
+            // page cursors and keep only the last, they will end up independent
+            for (p in 0..i) {
+                cursorDevice.createCursorRemoteControlsPage("Remotes cursor $i $p", 8, null)
+            }
+            val remoteControlsPage: CursorRemoteControlsPage =
+                cursorDevice.createCursorRemoteControlsPage("Remotes cursor $i", 8, null)
             var pageCount = 0
-            t.pageCount().addValueObserver {
+            remoteControlsPage.pageCount().addValueObserver {
                 pageCount = it
             }
 
-            t.pageNames().addValueObserver {
+            remoteControlsPage.pageNames().addValueObserver {
                 debug.out("page name for $i: ${it.joinToString(", ")}")
             }
 
