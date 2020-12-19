@@ -1,6 +1,7 @@
 package com.djcrontab.code.extensions
 
 import com.bitwig.extension.controller.api.*
+import java.io.IOException
 import kotlin.math.truncate
 
 
@@ -51,7 +52,6 @@ class DeviceController(
 
 }
 
-// TODO : "touch"
 
 class ParameterController(
     private val deviceController: DeviceController,
@@ -71,7 +71,7 @@ class ParameterController(
         }
         remoteControl.value().addValueObserver {
             val newValue = truncate((it.toFloat() * 1000f)) / 1000f
-            deviceController.debug("?$newValue,$lastKnownValue,$it")
+
             if (newValue != lastKnownValue) {
                 lastKnownValue = newValue
                 updateValue()
@@ -83,6 +83,10 @@ class ParameterController(
                 updateDisplayedValue()
             }
         }
+    }
+
+    fun touch(value: Boolean) {
+        remoteControl.touch(value)
     }
 
     fun updateName() {
@@ -130,31 +134,21 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
     private var deviceControllers = mutableListOf<DeviceController>()
 
     val offlineMessageQueue = mutableListOf<ByteArray>()
-    var initMessageBuffer : String = ""
+    var messageBuffer : String = ""
 
-    var bufferingActive = false
-
-    fun bufferedSend(codeBlock: () -> Unit) {
-        bufferingActive = true
-        codeBlock()
-        remoteConnection!!.send(initMessageBuffer.toByteArray())
-        initMessageBuffer = ""
-        bufferingActive = false
+    fun bufferedSend(message: String) {
+        messageBuffer += "$message\n"
     }
 
-    fun send(message: String) {
-        if (bufferingActive) {
-            initMessageBuffer += "$message\n"
-            return
-        }
-
-        val asByteArray = ("$message\n").toByteArray()
+    fun sendBuffer() {
+        val asByteArray = messageBuffer.toByteArray()
         if (remoteConnection != null) {
-            debug.out("will send $message")
+            debug.out("will send:\n$messageBuffer")
             remoteConnection!!.send(asByteArray)
+            messageBuffer = ""
         } else {
             offlineMessageQueue.add(asByteArray)
-            if (offlineMessageQueue.size > 100) {
+            if (offlineMessageQueue.size > 10) {
                 offlineMessageQueue.removeFirst()
             }
         }
@@ -166,14 +160,13 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
             this.remoteConnection = remoteConnection
             host.showPopupNotification("Remote control connected")
 
-            bufferedSend {
-                for (device in deviceControllers) {
-                    device.updateAll()
-                }
-                for (parameter in parameterControllers.values) {
-                    parameter.updateAll()
-                }
+            for (device in deviceControllers) {
+                device.updateAll()
             }
+            for (parameter in parameterControllers.values) {
+                parameter.updateAll()
+            }
+            flush()
 
             remoteConnection.setDisconnectCallback {
                 host.showPopupNotification("Remote control disconnected")
@@ -181,7 +174,11 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
             }
 
             for (message in offlineMessageQueue) {
-                remoteConnection.send(message)
+                try {
+                    remoteConnection.send(message)
+                } catch (e: IOException){
+                    return@setClientConnectCallback
+                }
             }
             offlineMessageQueue.clear()
 
@@ -195,6 +192,10 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                     parameterControllers[ParameterIndex(device, parameter)]!!.setValue(value)
                 } else if (action == "focus") {
                     deviceControllers[device].focus()
+                } else if (action == "touch") {
+                    val parameter = parts[2].toInt()
+                    val value = parts[3].toInt()
+                    parameterControllers[ParameterIndex(device, parameter)]!!.touch(value != 0)
                 }
             }
         }
@@ -206,13 +207,24 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
             val cursorDevice =
                 cursorTrack.createCursorDevice("Device ID $i", "Device $i", 0, CursorDeviceFollowMode.FOLLOW_SELECTION)
             val remoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8)
+            val t: CursorRemoteControlsPage = cursorDevice.createCursorRemoteControlsPage("Remotes cursor $i", 8, null)
+
+            var pageCount = 0
+            t.pageCount().addValueObserver {
+                pageCount = it
+            }
+
+            t.pageNames().addValueObserver {
+                debug.out("page name for $i: ${it.joinToString(", ")}")
+            }
+
 
             val deviceController = DeviceController(
                 cursorTrack,
                 cursorDevice,
                 remoteControlsPage,
                 i,
-                this::send,
+                this::bufferedSend,
                 this.debug::out
             ) { application.getAction(it).invoke() }
 
@@ -237,7 +249,9 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
         createRemoteControlSocket()
     }
 
-    override fun flush() {}
+    override fun flush() {
+        sendBuffer()
+    }
 
     override fun exit() {
         debug.out("Bye!")
