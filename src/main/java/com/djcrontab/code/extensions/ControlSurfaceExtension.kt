@@ -4,16 +4,21 @@ import com.bitwig.extension.controller.api.*
 import java.io.IOException
 import kotlin.math.truncate
 
+interface Flushable {
+    val onDirty: (flushable: Flushable) -> Unit
+    fun flush ()
+}
 
-class DeviceController(
+class DeviceController (
     private val cursorTrack: CursorTrack,
     private val cursorDevice: CursorDevice,
     private val remoteControlsPage: CursorRemoteControlsPage,
     val index: Int,
     val sendChange: (String) -> Unit,
     val debug: (String) -> Unit,
-    private val callAction: (String) -> Unit
-) {
+    private val callAction: (String) -> Unit,
+    override val onDirty: (Flushable) -> Unit
+) : Flushable {
     var deviceName = ""
     var remoteControlsPageName = ""
 
@@ -26,47 +31,71 @@ class DeviceController(
         callAction("select_item_at_cursor")
     }
 
-    fun sendDeviceName() {
+    fun getDeviceNameMessage() : String {
         var name = deviceName
         if (remoteControlsPageName != "") {
             name += "/$remoteControlsPageName"
         }
-        sendChange("$index,devicename,$name")
+        return "$index,devicename,$name"
+    }
+
+    fun sendDeviceName() {
+        sendChange(getDeviceNameMessage())
     }
 
     fun updateAll() {
         sendDeviceName()
     }
 
+    override fun flush() {
+        if (pageNameIsDirty || nameIsDirty) {
+            sendDeviceName()
+            pageNameIsDirty = false
+            nameIsDirty = false
+            onDirty(this)
+        }
+    }
+
+    var pageNameIsDirty = false
+    var nameIsDirty = false
+
     init {
+        // TODO check createCursorRemoteControlsPage
         remoteControlsPage.name.addValueObserver {
             remoteControlsPageName = it
-            sendDeviceName()
+            pageNameIsDirty = true
+            onDirty(this)
         }
 
         cursorDevice.name().addValueObserver {
             deviceName = it
-            sendDeviceName()
+            nameIsDirty = true
+            onDirty(this)
         }
     }
 
 }
 
 
-class ParameterController(
+class ParameterController (
     private val deviceController: DeviceController,
     private val remoteControl: RemoteControl,
-    private val index: Int,
-) {
+    private val index: Int, override val onDirty: (flushable: Flushable) -> Unit,
+) : Flushable {
     var lastKnownValue = 0f
     var lastKnownDisplayValue = ""
     var lastKnownName = ""
+
+    var nameIsDirty = false
+    var valueIsDirty = false
+    var displayedValueIsDirty = false
 
     init {
         remoteControl.name().addValueObserver {
             if (it != lastKnownName) {
                 lastKnownName = it
-                updateName()
+                nameIsDirty = true
+                onDirty(this)
             }
         }
         remoteControl.value().addValueObserver {
@@ -74,19 +103,37 @@ class ParameterController(
 
             if (newValue != lastKnownValue) {
                 lastKnownValue = newValue
-                updateValue()
+                valueIsDirty = true
+                onDirty(this)
             }
         }
         remoteControl.displayedValue().addValueObserver {
             if (it != lastKnownDisplayValue) {
                 lastKnownDisplayValue = it
-                updateDisplayedValue()
+                displayedValueIsDirty = true
+                onDirty(this)
             }
         }
     }
 
     fun touch(value: Boolean) {
         remoteControl.touch(value)
+    }
+
+    override fun flush() {
+        if (nameIsDirty) {
+            updateName()
+            nameIsDirty = false
+        }
+        if (valueIsDirty) {
+            updateValue()
+            valueIsDirty = false
+        }
+
+        if (displayedValueIsDirty) {
+            updateDisplayedValue()
+            displayedValueIsDirty = false
+        }
     }
 
     fun updateName() {
@@ -133,7 +180,6 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
     private var parameterControllers = ParametersMap()
     private var deviceControllers = mutableListOf<DeviceController>()
 
-    val offlineMessageQueue = mutableListOf<ByteArray>()
     var messageBuffer : String = ""
 
     fun bufferedSend(message: String) {
@@ -141,17 +187,18 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
     }
 
     fun sendBuffer() {
-        val asByteArray = messageBuffer.toByteArray()
+        if (messageBuffer == "") { return }
+
         if (remoteConnection != null) {
+            val asByteArray = messageBuffer.toByteArray()
             debug.out("will send:\n$messageBuffer")
-            remoteConnection!!.send(asByteArray)
-            messageBuffer = ""
-        } else {
-            offlineMessageQueue.add(asByteArray)
-            if (offlineMessageQueue.size > 10) {
-                offlineMessageQueue.removeFirst()
+            try {
+                remoteConnection!!.send(asByteArray)
+            } catch (e: IOException) {
+
             }
         }
+        messageBuffer = ""
     }
 
     private fun createRemoteControlSocket() {
@@ -172,15 +219,6 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                 host.showPopupNotification("Remote control disconnected")
                 this.remoteConnection = null
             }
-
-            for (message in offlineMessageQueue) {
-                try {
-                    remoteConnection.send(message)
-                } catch (e: IOException){
-                    return@setClientConnectCallback
-                }
-            }
-            offlineMessageQueue.clear()
 
             remoteConnection.setReceiveCallback { message ->
                 val parts = message.decodeToString().split(",")
@@ -218,6 +256,22 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                 debug.out("page name for $i: ${it.joinToString(", ")}")
             }
 
+            val flushables = mutableSetOf<Flushable>()
+            var flushIsScheduled = false
+
+            fun scheduleFlush(flushable: Flushable) {
+                flushables.add(flushable)
+                if (!flushIsScheduled) {
+                    host.scheduleTask({
+                        for (flushableItem in flushables) {
+                            flushableItem.flush()
+                        }
+                        flushIsScheduled = false
+                        flush()
+                    }, 20)
+                    flushIsScheduled = true
+                }
+            }
 
             val deviceController = DeviceController(
                 cursorTrack,
@@ -225,8 +279,11 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                 remoteControlsPage,
                 i,
                 this::bufferedSend,
-                this.debug::out
-            ) { application.getAction(it).invoke() }
+                this.debug::out,
+                { application.getAction(it).invoke() }
+            ) {
+                scheduleFlush(it)
+            }
 
             deviceControllers.add(deviceController)
 
@@ -236,7 +293,9 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                     deviceController,
                     remoteControl,
                     j
-                )
+                ) {
+                    scheduleFlush(it)
+                }
                 parameterControllers[ParameterIndex(i, j)] = parameterController
             }
         }
