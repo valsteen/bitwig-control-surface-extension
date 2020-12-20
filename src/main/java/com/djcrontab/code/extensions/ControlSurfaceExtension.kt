@@ -69,8 +69,13 @@ class DeviceController (
         remoteControlsPage.selectNextPage(true)
     }
 
+    fun setPage(page: Int) {
+        remoteControlsPage.selectedPageIndex().set(page)
+    }
+
     var pageNameIsDirty = false
     var nameIsDirty = false
+    var currentDevicePage : Int = 0
 
     init {
         // TODO check createCursorRemoteControlsPage
@@ -84,6 +89,11 @@ class DeviceController (
             deviceName = it
             nameIsDirty = true
             onDirty(this)
+        }
+
+        val currentPage = cursorDevice.createCursorRemoteControlsPage(0)
+        currentPage.selectedPageIndex().addValueObserver {
+            currentDevicePage = it
         }
     }
 
@@ -258,9 +268,11 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                         parameterControllers[ParameterIndex(device, parameter)]!!.touch(value != 0)
                     }
                     "pin" -> {
-                        deviceControllers[device].pin(false)
+                        val currentDevice = deviceControllers[device]
+                        currentDevice.pin(false)
                         host.scheduleTask({
-                            deviceControllers[device].pin(true)
+                            currentDevice.pin(true)
+                            currentDevice.setPage(currentDevice.currentDevicePage)
                         }, 100)
                     }
                 }
