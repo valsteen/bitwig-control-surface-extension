@@ -1,5 +1,7 @@
 package com.djcrontab.code.extensions
 
+import com.bitwig.extension.callback.ColorValueChangedCallback
+import com.bitwig.extension.callback.ObjectValueChangedCallback
 import com.bitwig.extension.controller.api.*
 import java.io.IOException
 import kotlin.math.truncate
@@ -50,6 +52,8 @@ class DeviceController (
 
     fun updateAll() {
         sendDeviceName()
+        updatePlaying()
+        updateColor()
     }
 
     override fun flush() {
@@ -57,7 +61,17 @@ class DeviceController (
             sendDeviceName()
             pageNameIsDirty = false
             nameIsDirty = false
-            onDirty(this)
+        }
+
+        if (audioIsPlayingDirty || noteIsPlayingIsDirty) {
+            updatePlaying()
+            audioIsPlayingDirty = false
+            noteIsPlayingIsDirty = false
+        }
+
+        if (colorIsDirty) {
+            updateColor()
+            colorIsDirty = false
         }
     }
 
@@ -77,8 +91,24 @@ class DeviceController (
     var nameIsDirty = false
     var currentDevicePage : Int = 0
 
+    var audioIsPlayingDirty = false
+    var audioIsPlaying = false
+    var noteIsPlaying = false
+    var noteIsPlayingIsDirty = false
+
+    fun updatePlaying() {
+        val isPlaying = if (noteIsPlaying || audioIsPlaying) 1 else 0
+        sendChange("$index,playing,${isPlaying}")
+    }
+
+    fun updateColor() {
+        sendChange("$index,color,${color.red},${color.green},${color.blue}")
+    }
+
+    var colorIsDirty = false
+    var color = Color(0,0,0)
+
     init {
-        // TODO check createCursorRemoteControlsPage
         remoteControlsPage.name.addValueObserver {
             remoteControlsPageName = it
             pageNameIsDirty = true
@@ -95,9 +125,42 @@ class DeviceController (
         currentPage.selectedPageIndex().addValueObserver {
             currentDevicePage = it
         }
-    }
 
+        cursorTrack.addVuMeterObserver(127, -1,false) {
+            val audioIsPlaying = it > 0
+
+            if (audioIsPlaying != this.audioIsPlaying) {
+                this.audioIsPlaying = audioIsPlaying
+                audioIsPlayingDirty = true
+                onDirty(this)
+            }
+        }
+
+        cursorTrack.color().addValueObserver(ColorValueChangedCallback { red, green, blue ->
+            color = Color(
+                red = (red * 256).toInt(),
+                green = (green * 256).toInt(),
+                blue = (blue * 256).toInt()
+            )
+            colorIsDirty = true
+            onDirty(this)
+        })
+
+        cursorTrack.playingNotes().addValueObserver(ObjectValueChangedCallback {
+            if (it.isNotEmpty() != noteIsPlaying) {
+                noteIsPlaying = it.isNotEmpty()
+                noteIsPlayingIsDirty = true
+                onDirty(this)
+            }
+        })
+    }
 }
+
+data class Color(
+    val red: Int,
+    val green: Int,
+    val blue: Int
+)
 
 
 class ParameterController (
@@ -137,6 +200,8 @@ class ParameterController (
                 onDirty(this)
             }
         }
+
+        remoteControl.setIndication(true)
     }
 
     fun touch(value: Boolean) {
