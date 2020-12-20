@@ -11,7 +11,7 @@ interface Flushable {
 
 class DeviceController (
     private val cursorTrack: CursorTrack,
-    private val cursorDevice: CursorDevice,
+    private val cursorDevice: PinnableCursorDevice,
     private val remoteControlsPage: CursorRemoteControlsPage,
     val index: Int,
     val sendChange: (String) -> Unit,
@@ -29,6 +29,11 @@ class DeviceController (
         callAction("select_item_at_cursor")
         callAction("focus_or_toggle_device_panel")
         callAction("select_item_at_cursor")
+    }
+
+    fun pin(isPinned: Boolean) {
+        cursorTrack.isPinned.set(isPinned)
+        cursorDevice.isPinned.set(isPinned)
     }
 
     fun getDeviceNameMessage() : String {
@@ -252,13 +257,19 @@ class ControlSurfaceExtension(private val definition: ControlSurfaceExtensionDef
                         val value = parts[3].toInt()
                         parameterControllers[ParameterIndex(device, parameter)]!!.touch(value != 0)
                     }
+                    "pin" -> {
+                        deviceControllers[device].pin(false)
+                        host.scheduleTask({
+                            deviceControllers[device].pin(true)
+                        }, 100)
+                    }
                 }
             }
         }
     }
 
     private fun createCursors() {
-        for (i in 0 until 12) {
+        for (i in 0 until 20) {
             val cursorTrack = host.createCursorTrack("Cursor ID $i", "Cursor $i", 0, 0, true)
             val cursorDevice =
                 cursorTrack.createCursorDevice("Device ID $i", "Device $i", 0, CursorDeviceFollowMode.FOLLOW_SELECTION)
